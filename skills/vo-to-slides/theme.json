@@ -1,0 +1,60 @@
+{
+  "name": "mi-marca",
+  "background": "F7F4EF",
+  "colors": {
+    "navy": "1B2A4A",
+    "navyMid": "2E3F60",
+    "champagne": "C9A84C",
+    "champagneLt": "E2C97E",
+    "warmWhite": "F7F4EF",
+    "nearBlack": "111111",
+    "border": "D9D9D9",
+    "accentText": "2E3F60",
+    "card": "FFFFFF",
+    "cardLight": "FBF9F5",
+    "cardDark": "E2C97E",
+    "white": "FFFFFF",
+    "black": "1B2A4A",
+    "grey": "8C8C8C",
+    "greyLight": "D9D9D9",
+    "accent": "C9A84C",
+    "red": "1B2A4A",
+    "blue": "2E3F60",
+    "sage": "E2C97E",
+    "sageDark": "C9A84C",
+    "lavender": "E8E2D4",
+    "lavenderDark": "2E3F60",
+    "green": "5E7F5A",
+    "danger": "B8473A"
+  },
+  "fonts": {
+    "heading": "Georgia",
+    "headingFallback": "Times New Roman",
+    "body": "Calibri",
+    "bodyFallback": "Arial",
+    "code": "Consolas",
+    "codeFallback": "Courier New"
+  },
+  "sizes": {
+    "display": 48,
+    "title": 40,
+    "heading": 32,
+    "subheading": 22,
+    "body": 16,
+    "label": 14,
+    "caption": 12
+  },
+  "spacing": {
+    "cardRadius": 12,
+    "cardPadding": 24,
+    "cardBorder": 1,
+    "iconSize": 64,
+    "iconSizeLarge": 96,
+    "arrowStroke": 3
+  },
+  "brand": {
+    "topBar": true,
+    "footer": "",
+    "logoText": "TU"
+  }
+}

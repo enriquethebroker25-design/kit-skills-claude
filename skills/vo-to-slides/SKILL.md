@@ -1,0 +1,271 @@
+---
+name: vo-to-slides
+description: Convierte un guion de voz en off (voiceover) de un video en un deck .pptx muy visual, con diagramas e iconos, una idea por slide y texto mínimo. Usar cuando el usuario quiera slides/diapositivas para acompañar un video, reel o YouTube a partir de un guion o script de narración.
+---
+
+# VO-to-Slides Skill
+
+Turn voiceover scripts into diagram-heavy, visual slide decks. One idea per slide. Minimal text. Maximum visual impact.
+
+## Overview
+
+This skill takes a voiceover script (the narration for a video) and produces a complete `.pptx` presentation where every slide communicates exactly one idea through diagrams, icons, and visual layouts — not walls of text.
+
+**The pipeline:**
+```
+Heptabase / Folder → Gather Script + Assets → Slide Spec (JSON) → Generated .pptx → QA Loop
+```
+
+## Phase 0: Gather Inputs
+
+Scripts and assets come from one of two sources:
+
+### Source A: Heptabase Whiteboard (primary)
+
+The user gives a whiteboard name, topic, or ID.
+
+1. **Find the whiteboard** — Use `search_whiteboards` with keywords, or `semantic_search_objects` to find script cards
+2. **Load everything** — Call `get_whiteboard_with_objects` to see all objects: cards, images, sections, text elements, connections
+3. **Read the script** — Use `get_object` on the script card(s) to get the full voiceover text. Check `hasMore` flag and paginate if needed
+4. **Grab images** — Identify all `imageCard` / `imageElement` objects on the whiteboard. These are screenshots, screen share demos, diagrams, UI mockups. Download and save each one to `vo-to-slides/assets/` with descriptive filenames (e.g., `assets/dashboard-screenshot.png`, `assets/mcp-diagram.png`)
+5. **Note context** — Read any section headers or text elements on the whiteboard for additional context about slide ordering or emphasis
+
+### Source B: Local Folder
+
+The user gives a folder path containing the script (`.md` file) and images.
+
+1. **Read the script** — Find and read the `.md` file
+2. **Copy images** — Copy all `.png`, `.jpg`, `.gif`, `.webp` files to `vo-to-slides/assets/`
+3. **Note any README or notes** for context
+
+### Source C: Pasted Text
+
+The user pastes the script directly. No asset gathering needed unless they provide image paths separately.
+
+## Phase 1: Parse the Voiceover into Slide Moments
+
+Read the voiceover script and break it into **slide moments** — each moment is one idea that deserves its own slide. **Err heavily on the side of more slides.** A 10-minute script should produce 30-50+ slides minimum. They go fast in a video — the viewer barely registers each one before the next appears.
+
+### Rules for splitting:
+- **Chapter titles** get their own slide (icon + big text centered)
+- **Each distinct concept** gets its own slide (don't combine "the model" and "the tools" - separate slides)
+- **Analogies** get their own slide (visual comparison)
+- **Quotes** get their own slide
+- **Transitions** between sections get a chapter title slide
+- **Examples** get their own slide
+- **Screen share demos** get their own `reference_image` slide using assets gathered in Phase 0
+- **Before/after comparisons** mentioned in the script get split into separate slides or a `before_after` / `comparison` type
+- When in doubt, **make more slides** - it's a video, slides go fast
+- **NEVER combine two ideas on one slide** - if you're tempted, that's two slides
+
+### For each moment, determine:
+1. What is the ONE idea?
+2. What **slide type** best communicates it? (see `spec-schema.md`)
+3. What visual elements tell the story? (icons, diagrams, flows, comparisons)
+4. What text is needed? (labels only — not sentences)
+
+## Phase 2: Generate the Slide Spec
+
+Output a JSON spec following the schema in `spec-schema.md`. Each slide is an object with:
+- `type` — the layout template
+- `vo` — the voiceover line(s) this slide accompanies
+- `data` — type-specific content (titles, icons, labels, elements)
+
+Read `spec-schema.md` for all available types and their data formats.
+
+### Screenshot slides
+
+When the script references a website, UI, dashboard, or tool that should be shown as a live screenshot (not a pre-existing asset), use the `screenshot` slide type:
+
+```json
+{
+  "type": "screenshot",
+  "vo": "Here's what Claude Code looks like...",
+  "data": {
+    "screenshot_url": "https://claude.ai/code",
+    "screenshot_selector": ".main-content",
+    "screenshot_delay": 3000
+  }
+}
+```
+
+These are auto-captured in Phase 2.5.
+
+## Phase 2.5: Capture Screenshots
+
+If the spec contains any `screenshot` slides (slides with `screenshot_url` in their data), run the capture script:
+
+```bash
+python3 scripts/capture-screenshots.py spec.json
+```
+
+This uses Playwright (headless Chromium) to:
+1. Visit each URL
+2. Wait for page load + configurable delay
+3. Capture the viewport (or a specific CSS selector)
+4. Save to `assets/screenshot-{slug}.png`
+5. Update `spec.json` in-place, converting `screenshot` slides to `reference_image` slides
+
+**Options:**
+- `--width 1920` / `--height 1080` — viewport size (default: 1920x1080 for 16:9)
+- `--full-page` — capture full scrollable page instead of viewport
+
+**Requirements:** `pip install playwright && playwright install chromium`
+
+## Phase 3: Build the Slides
+
+Run `generate.js` with the spec to produce the `.pptx`:
+
+```bash
+# Install deps (first time only)
+npm install -g pptxgenjs react-icons react react-dom sharp
+# (si no los encuentra: set NODE_PATH a la carpeta node_modules global)
+
+# Generate
+node generate.js --spec spec.json --theme theme.json --output slides.pptx
+```
+
+The generator reads the JSON spec, the theme config, and any assets in `assets/`, then produces the final deck.
+
+## Phase 3.5: Upload to Google Slides + Insert Screenshots
+
+Upload the deck to Google Slides, then insert any additional screenshots directly:
+
+```bash
+# Upload pptx to Google Slides
+python3 upload_to_drive.py slides.pptx "Titulo del deck"
+
+# Insert screenshots directly into the Google Slides deck
+python3 scripts/insert-screenshots-gslides.py PRESENTATION_ID \
+    --url "https://docs.anthropic.com/en/docs/tool-use" \
+    --url "https://github.com/anthropics/claude-code"
+
+# Or insert from spec (all screenshot_url slides)
+python3 scripts/insert-screenshots-gslides.py PRESENTATION_ID --spec spec.json
+
+# Or insert a local image
+python3 scripts/insert-screenshots-gslides.py PRESENTATION_ID --file assets/demo.png
+
+# Insert at a specific position (default: append)
+python3 scripts/insert-screenshots-gslides.py PRESENTATION_ID --url "https://example.com" --at 5
+```
+
+The script uses Playwright to capture each URL, uploads the PNG to Google Drive, and inserts it as a full-bleed slide via the Slides API. No re-upload of the whole deck needed.
+
+**Requirements:**
+- `pip install playwright && playwright install chromium`
+- `gcloud auth login` (with Slides API enabled)
+- Google Slides API enabled: `gcloud services enable slides.googleapis.com`
+
+## Phase 4: QA
+
+```bash
+# Convert to images
+python3 scripts/office/soffice.py --headless --convert-to pdf slides.pptx
+rm -f slide-*.jpg
+pdftoppm -jpeg -r 150 slides.pdf slide
+ls -1 "$PWD"/slide-*.jpg
+```
+
+Inspect every slide. Check for:
+- Overlapping elements
+- Missing icons or broken layouts
+- Text overflow
+- Slides that have too much text (should be mostly visual)
+- Slides that don't communicate their ONE idea clearly
+
+## Design System
+
+**Read `design-guide.md` before generating any spec.** Ahí está la identidad visual de TU marca.
+
+### Personaliza tu marca (una sola vez)
+
+1. En `theme.json` cambia los colores HEX por los de tu marca (los nombres de token se quedan igual).
+2. En `theme.json > brand` pon `"logoText"` (tus iniciales) y `"footer"` (ej. `"Mi Marca | @miusuario"`, o `""` para no mostrarlo).
+3. Edita `design-guide.md` con tus reglas y tu CTA (WhatsApp, @usuario, web).
+
+Si ya rellenaste la skill `brand-template`, úsala como fuente de verdad para estos valores.
+
+## Assets
+
+Assets are gathered automatically in Phase 0 from Heptabase whiteboards or local folders. They live in `assets/` and are referenced by filename in the spec.
+
+### How assets become slides
+
+When the script references a demo, screenshot, UI, or diagram, match it to the corresponding asset and create a `reference_image` slide:
+
+```json
+{
+  "type": "reference_image",
+  "vo": "Here's what the MCP dashboard looks like...",
+  "data": { "image": "assets/mcp-dashboard.png" }
+}
+```
+
+The generator reads the file, converts to base64, and embeds it full-bleed (16:9 cover).
+
+### Asset naming convention
+
+Use descriptive kebab-case names when saving assets:
+- `assets/claude-code-terminal.png` (not `assets/img1.png`)
+- `assets/mcp-server-diagram.png`
+- `assets/before-refactor.png`
+
+### Interleaving assets with diagrams
+
+Don't dump all screenshots in a row. Interleave them with diagrammatic slides:
+```
+chapter_title → reference_image (demo) → single_concept (explain) → reference_image (result) → comparison
+```
+
+This keeps the visual rhythm varied and engaging.
+
+## Icon Library
+
+Icons come from `react-icons`. Use the icon key names defined in the generator. Common ones:
+
+| Key | Icon | Use for |
+|-----|------|---------|
+| `brain` | Brain | Models, AI, thinking |
+| `wrench` | Wrench | Tools, building |
+| `file` | Document | Prompts, skills, docs |
+| `globe` | Globe | Browser, web, world |
+| `db` | Database | Data, storage |
+| `plug` | Plug | APIs, connections, MCP |
+| `terminal` | Terminal | Code, CLI |
+| `cogs` | Gears | Processing, systems |
+| `folder` | Folder | Files, skills |
+| `bulb` | Lightbulb | Ideas, smart |
+| `grad` | Graduation cap | Experience, learning |
+| `medal` | Medal | Achievement, expertise |
+| `user` | Person | People, users |
+| `userTie` | Professional | Business, CPA |
+| `handshake` | Handshake | Onboarding, deals |
+| `headset` | Headset | Support |
+| `calc` | Calculator | Finance, accounting |
+| `gavel` | Gavel | Legal |
+| `envelope` | Envelope | Email |
+| `chart` | Bar chart | Analytics, data |
+| `comment` | Speech bubble | Chat, conversation |
+| `rocket` | Rocket | Launch, build |
+| `laptop` | Laptop | Code, work |
+| `star` | Star | Quality, featured |
+| `search` | Magnifying glass | Discovery, search |
+| `book` | Book | Knowledge, reading |
+| `bookOpen` | Open book | Learning, skills |
+| `check` | Checkmark | Success, done |
+| `xCircle` | X circle | Failure, wrong |
+| `warning` | Warning | Danger, overload |
+| `clipboard` | Clipboard | Tasks, lists |
+
+## Key Principles
+
+1. **Diagrams over text** - If you can show it with icons and arrows, don't write a paragraph
+2. **One idea per slide** - If a slide has two ideas, split it. No exceptions
+3. **Labels not sentences** - Text on slides should be 1-5 words max
+4. **Visual variety** - Don't repeat the same layout 3 slides in a row. Alternate between diagram types and reference images
+5. **Icons tell stories** - A lightbulb + "≠" + graduation cap says "smart isn't experienced" without a single sentence
+6. **Reference images slot in** - Screenshots, demos, and diagrams from Heptabase or folders go in as full-bleed `reference_image` slides
+7. **More slides = better** - For video, 30-50+ slides for a 10-15 min script is the minimum. When in doubt, add another slide
+8. **Interleave demos with diagrams** - Don't cluster all screenshots together. Alternate: demo → explain → demo → compare
+9. **Every slide earns its place** - Each slide should make the viewer understand something they didn't 2 seconds ago
